@@ -1,0 +1,83 @@
+[project]
+name = "drivenow"
+version = "1.0.0"
+description = "Vehicle management system for the DriveNow car rental company"
+requires-python = ">=3.12"
+
+dependencies = [
+    "fastapi>=0.115.0,<0.116",
+    "uvicorn[standard]>=0.30.6,<0.31",
+    "sqlalchemy>=2.0.35,<2.1",
+    "alembic>=1.13.3,<1.14",
+    "psycopg2-binary>=2.9.9,<3",
+    "pydantic>=2.9.2,<3",
+    "pydantic-settings>=2.5.2,<3",
+    "prometheus-client>=0.21.0,<0.22",
+    "pika>=1.3.2,<2",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.3,<9",
+    "pytest-cov>=5.0.0,<6",
+    "httpx>=0.27.2,<0.28",
+    "ruff>=0.6.9,<0.7",
+    "pre-commit>=3.8.0,<5",
+]
+
+[tool.uv]
+# This is a deployed application, not a distributable library, so uv does
+# not need to build and install it as a package — the source is copied
+# into the image directly.
+package = false
+
+# Version ranges above express real compatibility; uv.lock pins the exact
+# resolved versions (including every transitive dependency, with hashes).
+# Ranges declare intent, the lockfile guarantees reproducibility.
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Integration tests are excluded by default so the everyday suite needs no
+# services running. CI runs them explicitly with `-m integration`.
+addopts = "-q --strict-markers -m 'not integration'"
+markers = [
+    "integration: requires a live PostgreSQL instance (see DATABASE_URL)",
+]
+
+[tool.ruff]
+# Ruff is both the linter and the formatter. Its formatter is a
+# reimplementation of Black and produces near-identical output, so adding
+# Black alongside it would be a second tool doing the same job.
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "F",    # pyflakes
+    "I",    # import sorting (replaces isort)
+    "UP",   # pyupgrade — modern syntax
+    "B",    # bugbear — likely bugs
+    "SIM",  # simplifiable code
+    "C4",   # comprehensions
+    "RUF",  # ruff-specific
+]
+ignore = [
+    "B008",  # FastAPI's Depends()/Query() in defaults is the intended idiom
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Migrations are generated and follow Alembic's own conventions.
+"alembic/versions/*" = ["E501"]
+
+[tool.ruff.format]
+# Black-compatible defaults, stated explicitly so the choice is visible.
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "lf"
+docstring-code-format = true
+
+[tool.coverage.run]
+source = ["app"]
+omit = ["app/main.py"]

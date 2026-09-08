@@ -1,0 +1,65 @@
+# Pre-commit hooks. Install once per clone:
+#     uv run pre-commit install --install-hooks
+#     uv run pre-commit install --hook-type pre-push
+#
+# Fast checks run on every commit; the test suite runs on push, where a
+# few seconds of latency is acceptable and a broken push is not.
+
+default_install_hook_types: [pre-commit, pre-push]
+fail_fast: false
+
+repos:
+  # ---- ruff: lint + format (replaces black, isort, flake8) ----
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      - id: ruff
+        name: ruff (lint)
+        args: [--fix, --exit-non-zero-on-fix]
+      - id: ruff-format
+        name: ruff (format)
+
+  # ---- keep uv.lock in sync with pyproject.toml ----
+  # Without this, a dependency added to pyproject.toml but never locked
+  # passes review and then fails the Docker build (which uses --frozen).
+  - repo: https://github.com/astral-sh/uv-pre-commit
+    rev: 0.4.20
+    hooks:
+      - id: uv-lock
+
+  # ---- general hygiene ----
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-json
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: check-added-large-files
+        args: [--maxkb=500]
+      - id: detect-private-key
+      - id: debug-statements        # catches a forgotten breakpoint()
+
+  # ---- project-specific ----
+  - repo: local
+    hooks:
+      # Alembic silently ignores a second head, then migrations diverge.
+      # Cheap to check, painful to discover later.
+      - id: alembic-single-head
+        name: alembic has exactly one head
+        entry: python scripts/check_single_head.py
+        language: system
+        pass_filenames: false
+        files: ^alembic/versions/
+
+      - id: pytest
+        name: pytest (unit tests)
+        entry: uv run pytest -q
+        language: system
+        pass_filenames: false
+        stages: [pre-push]

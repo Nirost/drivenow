@@ -1,0 +1,105 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: drivenow_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: drivenow
+      POSTGRES_PASSWORD: drivenow
+      POSTGRES_DB: drivenow
+    ports:
+      - "5432:5432"
+    volumes:
+      - drivenow_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U drivenow -d drivenow"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: drivenow_mq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: drivenow
+      RABBITMQ_DEFAULT_PASS: drivenow
+    ports:
+      - "5672:5672"     # AMQP
+      - "15672:15672"   # management UI — http://localhost:15672
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # Migrations run once, as their own unit, rather than racing between
+  # the api/relay/consumer containers on startup.
+  migrate:
+    build: .
+    container_name: drivenow_migrate
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg2://drivenow:drivenow@db:5432/drivenow
+    command: alembic upgrade head
+    restart: "no"
+
+  api:
+    build: .
+    container_name: drivenow_api
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgresql+psycopg2://drivenow:drivenow@db:5432/drivenow
+      LOG_LEVEL: INFO
+      ENVIRONMENT: development
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./logs:/app/logs
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+  # Publishes outbox events. Separate process so a slow or unavailable
+  # broker can never add latency to an API request.
+  relay:
+    build: .
+    container_name: drivenow_relay
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg2://drivenow:drivenow@db:5432/drivenow
+      EVENT_PUBLISHER: rabbitmq
+      RABBITMQ_URL: amqp://drivenow:drivenow@rabbitmq:5672/
+      LOG_LEVEL: INFO
+    volumes:
+      - ./logs:/app/logs
+    command: python -m app.relay
+
+  # Example downstream consumer. The API knows nothing about it.
+  notifications:
+    build: .
+    container_name: drivenow_notifications
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg2://drivenow:drivenow@db:5432/drivenow
+      RABBITMQ_URL: amqp://drivenow:drivenow@rabbitmq:5672/
+      LOG_LEVEL: INFO
+    volumes:
+      - ./logs:/app/logs
+    command: python -m app.consumers
+
+volumes:
+  drivenow_pgdata:
