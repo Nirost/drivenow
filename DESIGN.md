@@ -48,7 +48,7 @@ verifiable rather than asserted.
 | 5 | At least 4 unit tests | ✅ | **60 tests** across 6 files — §8 |
 | 6 | Runs as a standalone Python application | ✅ | `uv run uvicorn app.main:app` |
 | 6 | Dependency management | ✅ | `pyproject.toml` + `uv.lock` (§9) |
-| 6 | `docker-compose.yml` | ✅ | App + PostgreSQL, healthcheck-gated |
+| 6 | `docker-compose.yml` | ✅ | API, relay, consumer, PostgreSQL, RabbitMQ, migrate job |
 | 7 | Public Git repository | ✅ | Hosted on GitHub |
 | 7 | Clear commit messages, feature branch | ✅ | Scoped commits on `drivenow_branch` |
 | — | Message queue communication *(optional)* | ✅ | Transactional outbox + RabbitMQ — §10 |
@@ -63,7 +63,7 @@ verifiable rather than asserted.
 | README: how to use the API | ✅ | Endpoint table + `curl` examples |
 | README: architecture description | ✅ | |
 | README: example usage | ✅ | |
-| README: screenshots *(recommended)* | ✅ | `docs/` — Swagger UI, metrics, broker, event flow |
+| README: screenshots *(recommended)* | ✅ | `docs/` — Swagger UI, metrics, event flow |
 | Link to Git repository | ✅ | GitHub |
 
 **Beyond the brief** (each justified in the section noted): transactional
@@ -407,9 +407,11 @@ the fast suite needs nothing running. CI executes both.
   ranges; `uv.lock` pins every dependency **including transitive ones**,
   with hashes. A pinned `requirements.txt` constrains only direct
   dependencies — `fastapi==0.115.0` still lets `starlette` drift between
-  builds. An exported `requirements.txt` is kept as a pip fallback.
-- **`docker-compose.yml`**: PostgreSQL with a healthcheck; the app waits
-  on it, runs `alembic upgrade head`, then serves.
+  builds — so the lockfile is the only dependency manifest kept.
+- **`docker-compose.yml`**: six services — PostgreSQL and RabbitMQ, both
+  healthcheck-gated; a one-shot `migrate` job the others wait on, so no
+  container races to apply the same migration; then the API, the outbox
+  relay and the notifications consumer.
 - **Container hardening**: multi-stage build (no compiler or uv in the
   runtime image), non-root user, `HEALTHCHECK` instruction.
 - **Schema ownership**: Alembic migrations, not `create_all()`. Startup
@@ -482,7 +484,7 @@ flowchart LR
 |---|---|---|
 | Event definitions | `app/services/events.py` | Typed event contract |
 | Outbox table | `app/models/outbox.py` | `outbox_events`, `processed_events` |
-| Staging | `app/repositories/outbox_repository.py` | Write in-transaction; claim batches |
+| Staging | `app/repositories/outbox_repository.py` | Write in-transaction; claim rows individually |
 | Publisher | `app/messaging/publisher.py` | `EventPublisher` Protocol + 3 impls |
 | RabbitMQ | `app/messaging/rabbitmq.py` | Topic exchange, publisher confirms |
 | Relay | `app/relay/relay.py` | Poll → publish → mark |
@@ -510,9 +512,20 @@ budget for nothing.
 successfully for a message the broker never accepted, and the relay would
 mark it published. That is a silent-loss bug that only appears under load.
 
-**Multiple relay instances are safe.** `SELECT … FOR UPDATE SKIP LOCKED`
-means a second worker skips rows the first has claimed rather than
-blocking or double-publishing.
+**Multiple relay instances are safe.** Each row is locked individually
+with `SELECT … FOR UPDATE SKIP LOCKED`, held across the publish and the
+status update, so a second worker skips it rather than blocking or
+double-publishing. The lock is deliberately *not* taken over the whole
+batch: the relay commits after every event, and a commit releases every
+lock the transaction holds — a batch-wide claim would protect only the
+first event and leave the rest of the batch unlocked mid-flight.
+
+**An unroutable event is not a failure.** Publishing is `mandatory`, so
+RabbitMQ returns a message no queue is bound to. That is a topology gap,
+not a delivery problem: the broker accepted it and no retry can change
+the outcome, so it is logged and the row marked published. Treating it as
+a failure would dead-letter every event type nobody happens to consume
+yet — the opposite of what the outbox is for.
 
 ### Deliberate tradeoffs
 

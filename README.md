@@ -92,8 +92,8 @@ with self.uow:
 # one commit, atomically — or a full rollback
 ```
 
-If either write fails, neither is persisted. `test_failed_rental_leaves_
-no_partial_state` is the regression guard for this.
+If either write fails, neither is persisted.
+`test_failed_rental_leaves_no_partial_state` is the regression guard.
 
 ### 2. Double-booking is prevented at three levels
 
@@ -166,9 +166,14 @@ app/
   repositories/  data access (queries only, no commits)
   services/      business rules, transaction boundaries, domain exceptions
   api/           routers, schemas, dependency wiring, error mapping
+  messaging/     EventPublisher protocol + RabbitMQ implementation
+  relay/         outbox relay process — publishes committed events
+  consumers/     example downstream consumer (notifications)
   main.py        application assembly
 alembic/         versioned schema migrations
-tests/           service, API, and database-constraint tests
+scripts/         demo seeding, migration-head check
+tests/           service, API, database-constraint, and outbox tests
+docs/            README screenshots
 ```
 
 ---
@@ -181,7 +186,7 @@ tests/           service, API, and database-constraint tests
 docker compose up --build        # or: make up
 ```
 
-Starts five services: PostgreSQL, RabbitMQ, a one-shot `migrate` job, the
+Starts six services: PostgreSQL, RabbitMQ, a one-shot `migrate` job, the
 API, the outbox relay, and an example notifications consumer. Migrations
 run as their own unit that the others wait on, so containers never race to
 apply the same migration.
