@@ -1,4 +1,4 @@
-.PHONY: help install hooks lock export test cov itest lint format check migrate revision run relay consumer up down logs seed
+.PHONY: help install hooks lock test cov itest lint format check migrate revision run relay consumer up down logs seed
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "};{printf "\033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -13,9 +13,6 @@ hooks:     ## Run every pre-commit hook against all files
 
 lock:      ## Regenerate uv.lock from pyproject.toml
 	uv lock
-
-export:    ## Export a pip-compatible requirements.txt from the lock
-	uv export --no-dev --no-hashes --format requirements-txt > requirements.txt
 
 test:      ## Unit tests (SQLite, no services needed)
 	uv run pytest -v

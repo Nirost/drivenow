@@ -45,12 +45,12 @@ verifiable rather than asserted.
 | 5 | Separation of layers | ✅ | §2; enforced by import direction |
 | 5 | SOLID principles | ✅ | §6, with concrete mapping |
 | 5 | Clean, readable, documented code | ✅ | Docstrings state *why*, not *what* |
-| 5 | At least 4 unit tests | ✅ | **53 tests** across 6 files — §8 |
+| 5 | At least 4 unit tests | ✅ | **60 tests** across 6 files — §8 |
 | 6 | Runs as a standalone Python application | ✅ | `uv run uvicorn app.main:app` |
 | 6 | Dependency management | ✅ | `pyproject.toml` + `uv.lock` (§9) |
 | 6 | `docker-compose.yml` | ✅ | App + PostgreSQL, healthcheck-gated |
-| 7 | Public Git repository | ⬜ | **Requires your action** — see §11 |
-| 7 | Clear commit messages, feature branch | ⬜ | **Requires your action** — see §11 |
+| 7 | Public Git repository | ✅ | Hosted on GitHub |
+| 7 | Clear commit messages, feature branch | ✅ | Scoped commits on `drivenow_branch` |
 | — | Message queue communication *(optional)* | ✅ | Transactional outbox + RabbitMQ — §10 |
 
 ### Deliverables
@@ -63,16 +63,13 @@ verifiable rather than asserted.
 | README: how to use the API | ✅ | Endpoint table + `curl` examples |
 | README: architecture description | ✅ | |
 | README: example usage | ✅ | |
-| README: screenshots *(recommended)* | ⬜ | **Requires your action** — §11 |
-| Link to Git repository | ⬜ | **Requires your action** — §11 |
+| README: screenshots *(recommended)* | ✅ | `docs/` — Swagger UI, metrics, broker, event flow |
+| Link to Git repository | ✅ | GitHub |
 
 **Beyond the brief** (each justified in the section noted): transactional
 outbox with RabbitMQ (§10), CI pipeline (§9), PostgreSQL integration tests
 covering concurrency (§8), soft deletes, correlation IDs, and readiness
 probes.
-
-**Two open items are yours, not the code's:** the Git repository and
-screenshots. §11 covers both.
 
 ---
 
@@ -542,29 +539,10 @@ and publish latency.
 
 ---
 
-## 11. Open items requiring your action
+## 11. Known limitations
 
-| Item | Command / action |
-|---|---|
-| Generate the lockfile | `uv lock` — required before Docker builds (`--frozen` fails without it) |
-| Run the test suite | `make test` — I could not execute it; see the note below |
-| Git repository | `git init && git checkout -b feature/vehicle-management`, then push to a public repo |
-| Commit messages | Prefer several scoped commits over one bulk commit — e.g. `feat: add rental lifecycle with atomic transaction boundary` |
-| Screenshots | `/docs` (Swagger UI), `/metrics`, RabbitMQ UI at `:15672`, and relay/consumer logs showing an event flow end to end |
-| Watch the pipeline | `make up`, then `make seed`, then `docker compose logs -f relay notifications` |
-
-> **Verification note:** the environment I built this in has no network
-> access, so I could not install dependencies or execute `pytest`. Every
-> file compiles and the logic has been reviewed carefully, but the suite
-> has not been *run*. Please run `make test` before submitting; if
-> anything fails, the fix is quick.
-
----
-
-## 12. Known limitations
-
-Stating these is deliberate — an interviewer will find them anyway, and
-knowing where the boundaries are is part of the design.
+Stating these is deliberate: knowing where the boundaries are is part of
+the design.
 
 - **No authentication or authorization.** Every caller is trusted.
   Out of scope for the exercise; first addition for a real internal tool.
@@ -574,7 +552,9 @@ knowing where the boundaries are is part of the design.
 - **Relay ordering** is not globally guaranteed across multiple workers (§10).
 - **Consumer idempotency ledger** shares the producer's database (§10).
 - **`end_date` conflates planned and actual return** (§5).
-- **Row-locking untested** against real PostgreSQL (§8).
+- **Metrics are per-process.** Under multiple uvicorn workers each holds
+  its own registry; `prometheus_client`'s multiprocess collector would be
+  the fix.
 - **Offset pagination** degrades on large offsets; keyset pagination
   would be the fix at fleet scale.
 - **No pricing or overdue detection** — the obvious next domain concepts.

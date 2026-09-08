@@ -189,7 +189,7 @@ apply the same migration.
 To see the whole pipeline work end to end:
 
 ```bash
-make seed                                          # create demo fleet + rentals
+docker compose exec api python -m scripts.seed     # create demo fleet + rentals
 docker compose logs -f relay notifications         # watch events flow
 ```
 
@@ -200,6 +200,23 @@ docker compose logs -f relay notifications         # watch events flow
 | Readiness (checks DB) | http://localhost:8000/health/ready |
 | Metrics | http://localhost:8000/metrics |
 | RabbitMQ management UI | http://localhost:15672 (drivenow / drivenow) |
+
+### Screenshots
+
+**Swagger UI** — every endpoint, generated from the route signatures.
+
+![Swagger UI](docs/01-swagger-ui.png)
+
+**Metrics** — the fleet gauges, domain-error counters, and outbox depth
+that `/metrics` exposes to Prometheus.
+
+![Metrics](docs/02-metrics.png)
+
+**The event pipeline** — `make seed` writes to the outbox; the relay
+publishes each event to RabbitMQ; the notifications consumer handles it
+and records the `event_id` so a redelivery is a no-op.
+
+![Event flow](docs/03-event-flow.png)
 
 ### Local development
 
@@ -221,15 +238,13 @@ uv run uvicorn app.main:app --reload
 Common tasks are wrapped in the `Makefile`: `make test`, `make lint`,
 `make migrate`, `make run`, `make up`.
 
-**Without uv:** `pip install -r requirements.txt` still works. That file
-is an export of the lockfile's direct dependencies, kept for reviewers who
-would rather not install another tool — but it pins direct dependencies
-only and is therefore not reproducible. `uv.lock` is the source of truth.
+**Without uv:** `docker compose up --build` needs nothing but Docker, and
+is the path this project is tested on.
 
 ### Tests
 
 ```bash
-make test                   # 50 unit tests, SQLite, no services needed (3 more need Postgres)
+make test                   # 57 unit tests, SQLite, no services needed (3 more need Postgres)
 make cov                    # with coverage report
 make itest                  # integration tests against real PostgreSQL
 make lint                   # lint + formatting check
@@ -271,11 +286,11 @@ Indexes on `status` (the main filter) and `deleted_at` (in every query's `WHERE`
 | `POST` | `/cars` | 201. Starts `available`. |
 | `GET` | `/cars` | `?status=`, `?limit=`, `?offset=`. Excludes retired. |
 | `GET` | `/cars/{id}` | 404 if missing or retired. |
-| `PATCH` | `/cars/{id}` | Partial; omitted fields untouched. |
+| `PATCH` | `/cars/{id}` | Partial; omitted fields untouched. 409 on a status change the rental lifecycle owns. |
 | `DELETE` | `/cars/{id}` | 204. Soft delete; 409 during an active rental. |
 | `POST` | `/rentals` | 201. 409 if car unavailable. |
 | `GET` | `/rentals` | `?active_only=true`, paginated. |
-| `POST` | `/rentals/{id}/end` | Closes rental, releases car. |
+| `POST` | `/rentals/{id}/end` | Closes rental, releases car. 400 if `end_date` precedes the start. |
 
 ```bash
 # Add a car

@@ -11,4 +11,8 @@ logs/
 htmlcov/
 .DS_Store
 
+# IDE
+.idea/
+.vscode/
+
 # uv.lock IS committed — it is what makes builds reproducible.
