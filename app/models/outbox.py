@@ -82,7 +82,6 @@ class OutboxEvent(Base):
             postgresql_where=text("status = 'PENDING'"),
             sqlite_where=text("status = 'PENDING'"),
         ),
-        Index("ix_outbox_aggregate", "aggregate_type", "aggregate_id"),
     )
 
     def __repr__(self) -> str:

@@ -2,7 +2,7 @@ import enum
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, Enum, Index, Integer, String, func
+from sqlalchemy import DateTime, Enum, Index, Integer, String, func, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -51,10 +51,19 @@ class Car(Base):
     rentals: Mapped[list["Rental"]] = relationship(back_populates="car")
 
     __table_args__ = (
-        # status is the primary filter for GET /cars; deleted_at is in
-        # every query's WHERE clause.
-        Index("ix_cars_status", "status"),
-        Index("ix_cars_deleted_at", "deleted_at"),
+        # One index for the only shape these queries take: every car read
+        # filters `deleted_at IS NULL`, optionally narrows by status, and
+        # orders by id. Restricting it to live cars keeps retired rows out
+        # entirely, and the trailing id satisfies the ORDER BY without a
+        # sort. Two separate low-selectivity indexes on status and
+        # deleted_at matched no query the application actually issues.
+        Index(
+            "ix_cars_live_status",
+            "status",
+            "id",
+            postgresql_where=text("deleted_at IS NULL"),
+            sqlite_where=text("deleted_at IS NULL"),
+        ),
     )
 
     @property
