@@ -6,6 +6,7 @@ on `rental.started`, its shape cannot change casually. Defining them in
 one typed place (rather than inline dicts at each call site) is what makes
 that contract reviewable.
 """
+
 from dataclasses import dataclass
 from datetime import date, datetime
 from enum import Enum
@@ -25,7 +26,7 @@ class AggregateType(str, Enum):
 
 
 def _serialize(value: Any) -> Any:
-    if isinstance(value, (date, datetime)):
+    if isinstance(value, date | datetime):
         return value.isoformat()
     if isinstance(value, Enum):
         return value.value

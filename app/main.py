@@ -4,6 +4,7 @@ Application entrypoint — wiring only.
 Responsibilities: build the app, install middleware and error handlers,
 mount routers, and run startup checks. No business logic.
 """
+
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI

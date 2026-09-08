@@ -8,6 +8,7 @@ was both noisy and easy to forget on a new endpoint.
 Gauges are refreshed from cheap COUNT queries at scrape time, so they
 cannot drift from the database the way incrementing counters can.
 """
+
 from prometheus_client import Counter, Gauge, Histogram
 
 http_request_duration_seconds = Histogram(

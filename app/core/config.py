@@ -1,18 +1,15 @@
 """Centralized configuration, sourced from environment variables."""
+
 from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(
-        env_file=".env", extra="ignore", protected_namespaces=()
-    )
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore", protected_namespaces=())
 
     # Database
-    database_url: str = (
-        "postgresql+psycopg2://drivenow:drivenow@localhost:5432/drivenow"
-    )
+    database_url: str = "postgresql+psycopg2://drivenow:drivenow@localhost:5432/drivenow"
     db_pool_size: int = 5
     db_max_overflow: int = 10
 

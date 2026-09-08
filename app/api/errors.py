@@ -5,6 +5,7 @@ Routes stay free of try/except: they call the service and let domain
 exceptions propagate. Adding a new domain error means adding one line
 here, not editing every handler that might raise it.
 """
+
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 

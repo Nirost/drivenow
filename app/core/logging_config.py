@@ -5,6 +5,7 @@ Every log line carries the request_id of the request that produced it,
 so a single API call can be traced across all layers — the thing that
 actually matters when debugging production.
 """
+
 import json
 import logging
 import os
@@ -59,9 +60,7 @@ def setup_logging() -> None:
     console_handler.setFormatter(formatter)
     console_handler.addFilter(request_filter)
 
-    file_handler = RotatingFileHandler(
-        settings.log_file, maxBytes=5 * 1024 * 1024, backupCount=3
-    )
+    file_handler = RotatingFileHandler(settings.log_file, maxBytes=5 * 1024 * 1024, backupCount=3)
     file_handler.setFormatter(formatter)
     file_handler.addFilter(request_filter)
 

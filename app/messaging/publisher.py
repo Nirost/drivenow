@@ -8,6 +8,7 @@ dependency inversion earns its keep — there are genuinely three
 implementations (RabbitMQ, in-memory for tests, null for local runs
 without a broker).
 """
+
 from __future__ import annotations
 
 import json
@@ -67,8 +68,7 @@ class LoggingPublisher:
     """No broker — logs what would have been sent. For local development."""
 
     def publish(self, event: OutboxEvent) -> None:
-        logger.info("event.published_stdout type=%s id=%s",
-                    event.event_type, event.event_id)
+        logger.info("event.published_stdout type=%s id=%s", event.event_type, event.event_id)
 
     def close(self) -> None:
         pass

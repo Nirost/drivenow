@@ -5,6 +5,7 @@ A ContextVar rather than a global, so concurrent requests never read each
 other's ID. The logging filter reads from here, which is what lets a
 single request be traced across API, service, and repository log lines.
 """
+
 from contextvars import ContextVar
 
 request_id_var: ContextVar[str] = ContextVar("request_id", default="-")

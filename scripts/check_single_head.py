@@ -8,6 +8,7 @@ Checking at commit time is cheap; untangling it later is not.
 
 Portable across Linux and macOS — no `grep -P`, which is GNU-only.
 """
+
 import pathlib
 import re
 import sys

@@ -1,10 +1,16 @@
 import enum
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import DateTime, Enum, Index, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
+
+if TYPE_CHECKING:
+    # Import only for type checking: at runtime SQLAlchemy resolves the
+    # relationship by name, and a real import would be circular.
+    from app.models.rental import Rental
 
 
 class CarStatus(str, enum.Enum):
@@ -28,9 +34,7 @@ class Car(Base):
     # Soft delete. A rental company must not lose the vehicle record that
     # historical rentals (and invoices) point at, so "delete" retires the
     # car instead of removing the row.
-    deleted_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

@@ -4,6 +4,7 @@ Car endpoints.
 No try/except here by design — domain exceptions are translated to HTTP
 centrally in app/api/errors.py.
 """
+
 from fastapi import APIRouter, Query, Response, status
 
 from app.api.deps import CarServiceDep, PaginationDep
