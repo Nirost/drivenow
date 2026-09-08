@@ -58,16 +58,12 @@ def outbox_repo(db_session):
 
 @pytest.fixture()
 def car_service(uow, db_session, outbox_repo):
-    return CarService(
-        uow, CarRepository(db_session), RentalRepository(db_session), outbox_repo
-    )
+    return CarService(uow, CarRepository(db_session), RentalRepository(db_session), outbox_repo)
 
 
 @pytest.fixture()
 def rental_service(uow, db_session, outbox_repo):
-    return RentalService(
-        uow, CarRepository(db_session), RentalRepository(db_session), outbox_repo
-    )
+    return RentalService(uow, CarRepository(db_session), RentalRepository(db_session), outbox_repo)
 
 
 @pytest.fixture()
@@ -85,12 +81,18 @@ def relay(publisher):
 
 
 @pytest.fixture()
-def client(engine):
+def client(engine, monkeypatch):
     """API test client backed by the same in-memory database."""
     from fastapi.testclient import TestClient
 
+    from app import main
     from app.core.database import get_db
     from app.main import app
+
+    # The lifespan verifies connectivity against the module-level engine,
+    # which points at PostgreSQL. Without this the whole API suite needs a
+    # live database — exactly what the SQLite fixture exists to avoid.
+    monkeypatch.setattr(main, "engine", engine)
 
     TestingSession = sessionmaker(bind=engine, expire_on_commit=False)
 
