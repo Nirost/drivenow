@@ -10,6 +10,7 @@ The producer knows nothing about this process. Adding a billing consumer
 means writing another one of these and binding it to the exchange — no
 change to the API or the service layer.
 """
+
 from __future__ import annotations
 
 import json
@@ -29,6 +30,11 @@ CONSUMER_NAME = "notifications"
 QUEUE_NAME = "notifications.rentals"
 ROUTING_KEYS = ("rental.started", "rental.ended")
 
+# Messages this consumer rejects without requeueing land here instead of
+# being discarded, so a malformed event can still be inspected.
+DLX_NAME = "drivenow.events.dlx"
+DLQ_NAME = "notifications.rentals.dlq"
+
 
 def handle_event(envelope: dict) -> None:
     """The actual side effect. Replace with a real email/SMS call."""
@@ -38,12 +44,16 @@ def handle_event(envelope: dict) -> None:
     if event_type == "rental.started":
         logger.info(
             "notify.rental_confirmation customer=%s car_id=%s start=%s",
-            payload["customer_name"], payload["car_id"], payload["start_date"],
+            payload["customer_name"],
+            payload["car_id"],
+            payload["start_date"],
         )
     elif event_type == "rental.ended":
         logger.info(
             "notify.return_receipt customer=%s car_id=%s end=%s",
-            payload["customer_name"], payload["car_id"], payload["end_date"],
+            payload["customer_name"],
+            payload["car_id"],
+            payload["end_date"],
         )
 
 
@@ -52,8 +62,8 @@ def on_message(channel, method, properties, body) -> None:
         envelope = json.loads(body)
         event_id = envelope["event_id"]
     except (ValueError, KeyError):
-        # Malformed message: requeuing would loop forever. Drop it and
-        # let the broker's dead-letter policy keep it for inspection.
+        # Malformed message: requeuing would loop forever. Reject it to
+        # the dead-letter exchange, which keeps it for inspection.
         logger.exception("consumer.malformed_message")
         channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
         return
@@ -73,8 +83,7 @@ def on_message(channel, method, properties, body) -> None:
 
         # Ack only after the work AND the idempotency record are durable.
         channel.basic_ack(delivery_tag=method.delivery_tag)
-        logger.info("consumer.processed event_id=%s type=%s",
-                    event_id, envelope["event_type"])
+        logger.info("consumer.processed event_id=%s type=%s", event_id, envelope["event_type"])
     except Exception:
         logger.exception("consumer.handler_failed event_id=%s", event_id)
         session.rollback()
@@ -92,14 +101,18 @@ def main() -> None:
     connection = pika.BlockingConnection(params)
     channel = connection.channel()
 
-    channel.exchange_declare(
-        exchange=settings.events_exchange, exchange_type="topic", durable=True
+    channel.exchange_declare(exchange=settings.events_exchange, exchange_type="topic", durable=True)
+    channel.exchange_declare(exchange=DLX_NAME, exchange_type="fanout", durable=True)
+    channel.queue_declare(queue=DLQ_NAME, durable=True)
+    channel.queue_bind(exchange=DLX_NAME, queue=DLQ_NAME)
+
+    channel.queue_declare(
+        queue=QUEUE_NAME,
+        durable=True,
+        arguments={"x-dead-letter-exchange": DLX_NAME},
     )
-    channel.queue_declare(queue=QUEUE_NAME, durable=True)
     for key in ROUTING_KEYS:
-        channel.queue_bind(
-            exchange=settings.events_exchange, queue=QUEUE_NAME, routing_key=key
-        )
+        channel.queue_bind(exchange=settings.events_exchange, queue=QUEUE_NAME, routing_key=key)
 
     # Bounded prefetch: without it a single consumer grabs the whole queue
     # and no other instance gets any work.
