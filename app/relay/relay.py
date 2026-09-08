@@ -10,6 +10,7 @@ publish but before the status update, the event is republished on the
 next tick. Consumers deduplicate on `event_id` — see
 app/consumers/notifications.py.
 """
+
 from __future__ import annotations
 
 import signal
@@ -30,10 +31,13 @@ logger = get_logger(__name__)
 
 
 class OutboxRelay:
-    def __init__(self, publisher: EventPublisher,
-                 batch_size: int | None = None,
-                 poll_interval: float | None = None,
-                 max_attempts: int | None = None):
+    def __init__(
+        self,
+        publisher: EventPublisher,
+        batch_size: int | None = None,
+        poll_interval: float | None = None,
+        max_attempts: int | None = None,
+    ):
         self.publisher = publisher
         self.batch_size = batch_size or settings.outbox_batch_size
         self.poll_interval = poll_interval or settings.outbox_poll_interval_seconds
@@ -51,29 +55,37 @@ class OutboxRelay:
         repo = OutboxRepository(session)
         uow = UnitOfWork(session)
 
-        events = repo.fetch_pending(limit=self.batch_size)
-        if not events:
+        pending_ids = repo.fetch_pending_ids(limit=self.batch_size)
+        if not pending_ids:
             return 0
 
         published = 0
-        for event in events:
+        for event_id in pending_ids:
+            # Lock this row for the publish-and-mark round trip. Another
+            # worker may have taken it since the peek, in which case it is
+            # theirs to publish.
+            event = repo.claim(event_id)
+            if event is None:
+                continue
+
             try:
                 with outbox_publish_duration_seconds.time():
                     self.publisher.publish(event)
             except PublishError as exc:
                 logger.warning(
                     "outbox.publish_failed event_id=%s attempts=%s: %s",
-                    event.event_id, event.attempts + 1, exc,
+                    event.event_id,
+                    event.attempts + 1,
+                    exc,
                 )
                 with uow:
                     repo.mark_failure(event, str(exc), self.max_attempts)
                 if event.attempts >= self.max_attempts:
-                    outbox_events_failed_total.labels(
-                        event_type=event.event_type
-                    ).inc()
+                    outbox_events_failed_total.labels(event_type=event.event_type).inc()
                     logger.error(
                         "outbox.dead_lettered event_id=%s type=%s",
-                        event.event_id, event.event_type,
+                        event.event_id,
+                        event.event_type,
                     )
                 # Stop the batch: if the broker is down, the remaining
                 # events will fail too. Burning their retry budget on a
@@ -82,13 +94,12 @@ class OutboxRelay:
             else:
                 with uow:
                     repo.mark_published(event)
-                outbox_events_published_total.labels(
-                    event_type=event.event_type
-                ).inc()
+                outbox_events_published_total.labels(event_type=event.event_type).inc()
                 published += 1
                 logger.info(
                     "outbox.published event_id=%s type=%s",
-                    event.event_id, event.event_type,
+                    event.event_id,
+                    event.event_type,
                 )
         return published
 
@@ -97,7 +108,8 @@ class OutboxRelay:
         self._install_signal_handlers()
         logger.info(
             "relay.started batch_size=%s poll_interval=%ss",
-            self.batch_size, self.poll_interval,
+            self.batch_size,
+            self.poll_interval,
         )
 
         while self._running:
