@@ -271,7 +271,9 @@ must win.
 ## Schema
 
 **cars** — `id`, `model`, `year`, `status`, `deleted_at`, `created_at`, `updated_at`
-Indexes on `status` (the main filter) and `deleted_at` (in every query's `WHERE`).
+One partial index on `(status, id) WHERE deleted_at IS NULL` — the shape
+every car query takes: live rows, optionally narrowed by status, ordered
+by id.
 
 **rentals** — `id`, `car_id` → cars.id `RESTRICT`, `customer_name`, `start_date`, `end_date`, `created_at`
 `end_date IS NULL` means ongoing. Partial unique index on `car_id` where

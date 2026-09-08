@@ -354,15 +354,15 @@ alone cannot.
 
 ## 8. Testing strategy
 
-37 tests, four files, each targeting a different failure class. The
+60 tests across six files, each targeting a different failure class. The
 assignment asks for four; the count is a consequence of testing the
 concurrency and transaction guarantees, not padding.
 
 | File | Tests | Targets |
 |---|---|---|
-| `test_car_service.py` | 7 | Vehicle rules, partial updates, history preservation |
-| `test_rental_service.py` | 12 | Rental lifecycle, status transitions, rollback |
-| `test_api.py` | 14 | Status-code mapping, validation, serialization, correlation IDs |
+| `test_car_service.py` | 10 | Vehicle rules, partial updates, history preservation |
+| `test_rental_service.py` | 13 | Rental lifecycle, status transitions, rollback |
+| `test_api.py` | 17 | Status-code mapping, validation, serialization, correlation IDs |
 | `test_constraints.py` | 4 | Database invariants, asserted by bypassing the service |
 | `test_outbox.py` | 13 | Event atomicity, relay retry/dead-letter, idempotency |
 | `test_integration_postgres.py` | 3 | Real concurrency, partial index, JSONB *(marked `integration`)* |
@@ -549,6 +549,14 @@ the design.
 - **No idempotency keys** on `POST /rentals`. A client retry after a
   timeout could create a second rental.
 - **No rate limiting.**
+- **The broker path has no automated test.** The relay is covered through
+  an in-memory publisher, so its retry, dead-letter and idempotency
+  behaviour is asserted — but the RabbitMQ publisher and the notifications
+  consumer are only exercised by hand against `docker compose`. Asserting
+  real delivery means polling a live queue for an asynchronous result,
+  which belongs in a separate marked suite rather than the sub-second one.
+  Untested seams between a producer and a broker are where routing and
+  topology mistakes hide.
 - **Relay ordering** is not globally guaranteed across multiple workers (§10).
 - **Consumer idempotency ledger** shares the producer's database (§10).
 - **`end_date` conflates planned and actual return** (§5).
