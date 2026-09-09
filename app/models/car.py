@@ -66,9 +66,5 @@ class Car(Base):
         ),
     )
 
-    @property
-    def is_deleted(self) -> bool:
-        return self.deleted_at is not None
-
     def __repr__(self) -> str:
         return f"<Car id={self.id} model={self.model!r} status={self.status.value}>"

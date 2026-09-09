@@ -135,3 +135,20 @@ def test_setting_in_use_directly_returns_409(client):
 
     assert response.status_code == 409
     assert response.json()["code"] == "invalid_status_transition"
+
+
+def test_get_rental_by_id(client):
+    car = _add_car(client, model="Volvo XC40", year=2023)
+    created = client.post("/rentals", json={"car_id": car["id"], "customer_name": "Iris"}).json()
+
+    response = client.get(f"/rentals/{created['id']}")
+
+    assert response.status_code == 200
+    assert response.json() == created
+
+
+def test_get_missing_rental_returns_404_with_code(client):
+    response = client.get("/rentals/9999")
+
+    assert response.status_code == 404
+    assert response.json()["code"] == "rental_not_found"
