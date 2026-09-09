@@ -1,5 +1,6 @@
 """Data access for the transactional outbox."""
-from datetime import datetime, timezone
+
+from datetime import UTC, datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -27,30 +28,47 @@ class OutboxRepository:
         self.db.flush()
         return row
 
-    def fetch_pending(self, limit: int = 100) -> list[OutboxEvent]:
+    def fetch_pending_ids(self, limit: int = 100) -> list[int]:
         """
-        Claim a batch of pending events for publication.
+        Peek at the ids of pending events, oldest first.
 
-        FOR UPDATE SKIP LOCKED lets several relay instances run
-        concurrently without ever handing the same row to two of them —
-        the second worker skips locked rows instead of blocking.
-
-        Ordered by id so events are published in the order they occurred.
-        (Note: with multiple relay workers, global ordering is no longer
-        guaranteed — see DESIGN.md §10.)
+        Deliberately takes no lock: the relay commits after every event,
+        and a commit releases every lock held by that transaction. Locking
+        the whole batch up front would therefore protect only the first
+        event — the rest would sit unlocked while another worker claimed
+        them. Each event is locked individually by `claim` instead.
         """
         stmt = (
-            select(OutboxEvent)
+            select(OutboxEvent.id)
             .where(OutboxEvent.status == OutboxStatus.PENDING)
             .order_by(OutboxEvent.id)
             .limit(limit)
-            .with_for_update(skip_locked=True)
         )
         return list(self.db.scalars(stmt))
 
+    def claim(self, event_id: int) -> OutboxEvent | None:
+        """
+        Take a row lock on one pending event, for the duration of the
+        caller's transaction — which spans the publish and the status
+        update, so the lock is still held when the row is marked sent.
+
+        SKIP LOCKED returns None if another relay worker holds it. The
+        status re-check closes the window between the peek and the lock,
+        where a competing worker may have already published it.
+        """
+        stmt = (
+            select(OutboxEvent)
+            .where(
+                OutboxEvent.id == event_id,
+                OutboxEvent.status == OutboxStatus.PENDING,
+            )
+            .with_for_update(skip_locked=True)
+        )
+        return self.db.scalars(stmt).first()
+
     def mark_published(self, event: OutboxEvent) -> None:
         event.status = OutboxStatus.PUBLISHED
-        event.published_at = datetime.now(timezone.utc)
+        event.published_at = datetime.now(UTC)
         event.attempts += 1
         event.last_error = None
         self.db.flush()
@@ -82,10 +100,7 @@ class OutboxRepository:
     # ---- consumer-side idempotency ----
 
     def already_processed(self, event_id: str, consumer: str) -> bool:
-        return (
-            self.db.get(ProcessedEvent, {"event_id": event_id, "consumer": consumer})
-            is not None
-        )
+        return self.db.get(ProcessedEvent, {"event_id": event_id, "consumer": consumer}) is not None
 
     def mark_processed(self, event_id: str, consumer: str) -> None:
         self.db.add(ProcessedEvent(event_id=event_id, consumer=consumer))

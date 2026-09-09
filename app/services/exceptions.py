@@ -61,9 +61,7 @@ class CarHasActiveRentalError(ConflictError):
     code = "car_has_active_rental"
 
     def __init__(self, car_id: int, rental_id: int):
-        super().__init__(
-            f"Cannot retire car id={car_id}: rental id={rental_id} is still active"
-        )
+        super().__init__(f"Cannot retire car id={car_id}: rental id={rental_id} is still active")
         self.car_id = car_id
         self.rental_id = rental_id
 
@@ -74,9 +72,31 @@ class ConcurrentRentalError(ConflictError):
     code = "concurrent_rental"
 
     def __init__(self, car_id: int):
+        super().__init__(f"Car id={car_id} was rented by a concurrent request; please retry")
+        self.car_id = car_id
+
+
+class InvalidRentalPeriodError(DomainError):
+    """An end date earlier than the rental's start date."""
+
+    code = "invalid_rental_period"
+
+    def __init__(self, rental_id: int, start_date, end_date):
         super().__init__(
-            f"Car id={car_id} was rented by a concurrent request; please retry"
+            f"Rental id={rental_id} cannot end on {end_date}: " f"it started on {start_date}"
         )
+        self.rental_id = rental_id
+        self.start_date = start_date
+        self.end_date = end_date
+
+
+class InvalidStatusTransitionError(ConflictError):
+    """A status change that only the rental lifecycle is allowed to make."""
+
+    code = "invalid_status_transition"
+
+    def __init__(self, car_id: int, message: str):
+        super().__init__(f"Car id={car_id}: {message}")
         self.car_id = car_id
 
 

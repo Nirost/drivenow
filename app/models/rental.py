@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import (
     CheckConstraint,
@@ -15,6 +16,11 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
 
+if TYPE_CHECKING:
+    # Import only for type checking: at runtime SQLAlchemy resolves the
+    # relationship by name, and a real import would be circular.
+    from app.models.car import Car
+
 
 class Rental(Base):
     __tablename__ = "rentals"
@@ -23,7 +29,9 @@ class Rental(Base):
     car_id: Mapped[int] = mapped_column(
         # RESTRICT, not CASCADE: the database refuses to drop a car that
         # has rental history. Retiring a car is a soft delete instead.
-        ForeignKey("cars.id", ondelete="RESTRICT"), nullable=False, index=True
+        ForeignKey("cars.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
     )
     customer_name: Mapped[str] = mapped_column(String(120), nullable=False)
     start_date: Mapped[date] = mapped_column(Date, nullable=False)

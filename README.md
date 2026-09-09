@@ -74,86 +74,43 @@ are least reliable.
 
 ## Design decisions
 
-### 1. Transaction boundaries live in the service layer
+Each of these is argued in full — with the alternatives considered and
+the costs accepted — in **[DESIGN.md](DESIGN.md)**. In brief:
 
-Repositories `flush()` but never `commit()`. A repository cannot know
-whether it is the entire business operation or one step of five, so it
-cannot know where the transaction ends.
+1. **Transaction boundaries live in the service layer.** Repositories
+   `flush()` but never `commit()`: a repository cannot know whether it is
+   the whole operation or one step of five. Starting a rental writes the
+   rental, the car's status and the outbox event in one `UnitOfWork` —
+   all three commit, or none do. *(§2, §3)*
 
-Starting a rental writes to two tables — insert the rental, set the car
-to `IN_USE`. Both happen inside a single `UnitOfWork`:
+2. **Double-booking is prevented at three levels** — a status check for
+   the ordinary case, `SELECT … FOR UPDATE` for concurrent requests, and
+   a partial unique index on `(car_id) WHERE end_date IS NULL` that makes
+   two ongoing rentals for one car unrepresentable. *(§4)*
 
-```python
-with self.uow:
-    car = self.car_repo.get_for_update(car_id)     # row lock
-    ...
-    rental = self.rental_repo.create(...)
-    self.car_repo.apply_changes(car, status=CarStatus.IN_USE)
-# one commit, atomically — or a full rollback
-```
+3. **Cars are retired, not deleted.** Rentals are financial history
+   pointing at the vehicle, so `DELETE /cars/{id}` sets `deleted_at`; the
+   foreign key is `ON DELETE RESTRICT` so the database refuses a hard
+   delete regardless. *(§5)*
 
-If either write fails, neither is persisted. `test_failed_rental_leaves_
-no_partial_state` is the regression guard for this.
+4. **Errors map to HTTP in exactly one place.** Domain exceptions carry
+   business meaning and no status codes; `app/api/errors.py` owns the
+   translation, so route handlers contain no `try`/`except`. *(§6)*
 
-### 2. Double-booking is prevented at three levels
+5. **Ending a rental respects intervening state.** A car returns to
+   `available` only if it is still `in_use` — one flagged for maintenance
+   mid-rental stays in maintenance. *(§5)*
 
-Concurrency correctness does not rest on the application behaving:
+6. **Events use a transactional outbox, not direct publishing.** The
+   event is written in the same transaction as the rental and published
+   afterwards by a separate relay, because a database and a broker cannot
+   be committed atomically. Delivery is at-least-once, so consumers
+   deduplicate on `event_id`. *(§10)*
 
-| Level | Mechanism | Catches |
-|---|---|---|
-| Application | status check in `RentalService` | the ordinary case, with a clear 409 |
-| Transaction | `SELECT … FOR UPDATE` row lock | concurrent requests for the same car |
-| Schema | partial unique index on `(car_id) WHERE end_date IS NULL` | anything that slips past both |
-
-The index makes "two ongoing rentals for one car" **unrepresentable**.
-If a race still reaches the insert, PostgreSQL raises `IntegrityError`,
-which the service converts into a clean `409 concurrent_rental` rather
-than corrupting fleet state. `tests/test_constraints.py` asserts this by
-writing directly to the database, bypassing the service entirely.
-
-### 3. Cars are retired, not deleted
-
-`DELETE /cars/{id}` performs a **soft delete** (`deleted_at`). Rental
-rows are financial and audit history that reference the vehicle; hard
-deletion would destroy them. The foreign key is `ON DELETE RESTRICT`, so
-the database refuses a hard delete even if application code attempts one.
-
-### 4. Errors are mapped to HTTP in exactly one place
-
-Domain exceptions form a hierarchy (`NotFoundError`, `ConflictError`),
-and `app/api/errors.py` maps that hierarchy to status codes. Route
-handlers contain no `try`/`except` — adding a new domain error means
-adding one line, not editing every handler that could raise it. Every
-error response carries a stable machine-readable `code`.
-
-### 5. Ending a rental respects intervening state
-
-`end_rental` only returns a car to `AVAILABLE` if it is still `IN_USE`.
-A car flagged for maintenance mid-rental stays in maintenance rather than
-being silently released back into the available pool.
-
-### 6. Events use a transactional outbox, not direct publishing
-
-Publishing after `COMMIT` loses the event if the process dies in between;
-publishing before it can announce a rental that gets rolled back. Two
-systems cannot be committed atomically, so the event is written to an
-`outbox_events` table **inside the same transaction** as the rental, and a
-relay process publishes it afterwards.
-
-Delivery is at-least-once, so consumers deduplicate on `event_id`. Full
-rationale, failure modes, and tradeoffs in [DESIGN.md §10](DESIGN.md).
-
-### 7. Dependencies are locked, not just pinned
-
-`pyproject.toml` declares compatibility ranges; `uv.lock` pins the exact
-resolved version of every dependency **including transitive ones**, with
-hashes. A pinned `requirements.txt` only constrains direct dependencies —
-`fastapi==0.115.0` still lets `starlette` drift between builds, so two
-builds of the same commit can produce different images.
-
-The Docker build runs `uv sync --frozen`, which fails if `uv.lock` is
-missing or out of step with `pyproject.toml`. An image cannot be built
-from an unpinned dependency set.
+7. **Dependencies are locked, not just pinned.** `uv.lock` pins every
+   transitive dependency with hashes; the Docker build runs
+   `uv sync --frozen`, so an image cannot be built from an unpinned
+   dependency set. *(§9)*
 
 ---
 
@@ -166,9 +123,14 @@ app/
   repositories/  data access (queries only, no commits)
   services/      business rules, transaction boundaries, domain exceptions
   api/           routers, schemas, dependency wiring, error mapping
+  messaging/     EventPublisher protocol + RabbitMQ implementation
+  relay/         outbox relay process — publishes committed events
+  consumers/     example downstream consumer (notifications)
   main.py        application assembly
 alembic/         versioned schema migrations
-tests/           service, API, and database-constraint tests
+scripts/         demo seeding, migration-head check
+tests/           service, API, database-constraint, and outbox tests
+docs/            README screenshots
 ```
 
 ---
@@ -181,7 +143,7 @@ tests/           service, API, and database-constraint tests
 docker compose up --build        # or: make up
 ```
 
-Starts five services: PostgreSQL, RabbitMQ, a one-shot `migrate` job, the
+Starts six services: PostgreSQL, RabbitMQ, a one-shot `migrate` job, the
 API, the outbox relay, and an example notifications consumer. Migrations
 run as their own unit that the others wait on, so containers never race to
 apply the same migration.
@@ -189,7 +151,7 @@ apply the same migration.
 To see the whole pipeline work end to end:
 
 ```bash
-make seed                                          # create demo fleet + rentals
+docker compose exec api python -m scripts.seed     # create demo fleet + rentals
 docker compose logs -f relay notifications         # watch events flow
 ```
 
@@ -200,6 +162,23 @@ docker compose logs -f relay notifications         # watch events flow
 | Readiness (checks DB) | http://localhost:8000/health/ready |
 | Metrics | http://localhost:8000/metrics |
 | RabbitMQ management UI | http://localhost:15672 (drivenow / drivenow) |
+
+### Screenshots
+
+**Swagger UI** — every endpoint, generated from the route signatures.
+
+![Swagger UI](docs/01-swagger-ui.png)
+
+**Metrics** — the fleet gauges, domain-error counters, and outbox depth
+that `/metrics` exposes to Prometheus.
+
+![Metrics](docs/02-metrics.png)
+
+**The event pipeline** — seeding writes to the outbox; the relay
+publishes each event to RabbitMQ; the notifications consumer handles it
+and records the `event_id` so a redelivery is a no-op.
+
+![Event flow](docs/03-event-flow.png)
 
 ### Local development
 
@@ -221,15 +200,13 @@ uv run uvicorn app.main:app --reload
 Common tasks are wrapped in the `Makefile`: `make test`, `make lint`,
 `make migrate`, `make run`, `make up`.
 
-**Without uv:** `pip install -r requirements.txt` still works. That file
-is an export of the lockfile's direct dependencies, kept for reviewers who
-would rather not install another tool — but it pins direct dependencies
-only and is therefore not reproducible. `uv.lock` is the source of truth.
+**Without uv:** `docker compose up --build` needs nothing but Docker, and
+is the path this project is tested on.
 
 ### Tests
 
 ```bash
-make test                   # 50 unit tests, SQLite, no services needed (3 more need Postgres)
+make test                   # 57 unit tests, SQLite, no services needed (3 more need Postgres)
 make cov                    # with coverage report
 make itest                  # integration tests against real PostgreSQL
 make lint                   # lint + formatting check
@@ -256,7 +233,9 @@ must win.
 ## Schema
 
 **cars** — `id`, `model`, `year`, `status`, `deleted_at`, `created_at`, `updated_at`
-Indexes on `status` (the main filter) and `deleted_at` (in every query's `WHERE`).
+One partial index on `(status, id) WHERE deleted_at IS NULL` — the shape
+every car query takes: live rows, optionally narrowed by status, ordered
+by id.
 
 **rentals** — `id`, `car_id` → cars.id `RESTRICT`, `customer_name`, `start_date`, `end_date`, `created_at`
 `end_date IS NULL` means ongoing. Partial unique index on `car_id` where
@@ -271,11 +250,11 @@ Indexes on `status` (the main filter) and `deleted_at` (in every query's `WHERE`
 | `POST` | `/cars` | 201. Starts `available`. |
 | `GET` | `/cars` | `?status=`, `?limit=`, `?offset=`. Excludes retired. |
 | `GET` | `/cars/{id}` | 404 if missing or retired. |
-| `PATCH` | `/cars/{id}` | Partial; omitted fields untouched. |
+| `PATCH` | `/cars/{id}` | Partial; omitted fields untouched. 409 on a status change the rental lifecycle owns. |
 | `DELETE` | `/cars/{id}` | 204. Soft delete; 409 during an active rental. |
 | `POST` | `/rentals` | 201. 409 if car unavailable. |
 | `GET` | `/rentals` | `?active_only=true`, paginated. |
-| `POST` | `/rentals/{id}/end` | Closes rental, releases car. |
+| `POST` | `/rentals/{id}/end` | Closes rental, releases car. 400 if `end_date` precedes the start. |
 
 ```bash
 # Add a car

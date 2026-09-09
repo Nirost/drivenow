@@ -8,6 +8,7 @@ process publishes rows to the broker afterwards.
 This is what makes "the rental exists but billing never heard about it"
 impossible — the failure mode of publishing directly after COMMIT.
 """
+
 import enum
 import uuid
 from datetime import datetime
@@ -56,9 +57,7 @@ class OutboxEvent(Base):
     aggregate_id: Mapped[str] = mapped_column(String(64), nullable=False)
 
     # JSONB on PostgreSQL, plain JSON on SQLite so the test suite works.
-    payload: Mapped[dict] = mapped_column(
-        JSON().with_variant(JSONB, "postgresql"), nullable=False
-    )
+    payload: Mapped[dict] = mapped_column(JSON().with_variant(JSONB, "postgresql"), nullable=False)
 
     status: Mapped[OutboxStatus] = mapped_column(
         Enum(OutboxStatus, native_enum=False, length=16),
@@ -71,9 +70,7 @@ class OutboxEvent(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
-    published_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
         # The relay polls "pending, oldest first" on every tick. A partial
@@ -85,7 +82,6 @@ class OutboxEvent(Base):
             postgresql_where=text("status = 'PENDING'"),
             sqlite_where=text("status = 'PENDING'"),
         ),
-        Index("ix_outbox_aggregate", "aggregate_type", "aggregate_id"),
     )
 
     def __repr__(self) -> str:

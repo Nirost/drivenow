@@ -3,6 +3,8 @@ __pycache__/
 .venv/
 venv/
 .env
+.env.*
+!.env.example
 logs/
 *.log
 .pytest_cache/
@@ -10,5 +12,9 @@ logs/
 .coverage
 htmlcov/
 .DS_Store
+
+# IDE
+.idea/
+.vscode/
 
 # uv.lock IS committed — it is what makes builds reproducible.

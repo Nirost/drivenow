@@ -1,8 +1,9 @@
 """RabbitMQ implementation of EventPublisher (pika, synchronous)."""
+
 from __future__ import annotations
 
 import pika
-from pika.exceptions import AMQPError
+from pika.exceptions import AMQPError, UnroutableError
 
 from app.core.config import settings
 from app.core.logging_config import get_logger
@@ -37,9 +38,7 @@ class RabbitMQPublisher:
         params.blocked_connection_timeout = 15
         self._connection = pika.BlockingConnection(params)
         channel = self._connection.channel()
-        channel.exchange_declare(
-            exchange=self._exchange, exchange_type="topic", durable=True
-        )
+        channel.exchange_declare(exchange=self._exchange, exchange_type="topic", durable=True)
         # Publisher confirms: publish() only returns successfully once the
         # broker has acknowledged the message. Without this, a "successful"
         # publish can be silently dropped and the outbox row would be
@@ -58,11 +57,21 @@ class RabbitMQPublisher:
                 body=serialize(event),
                 properties=pika.BasicProperties(
                     content_type="application/json",
-                    delivery_mode=2,          # persist to disk
+                    delivery_mode=2,  # persist to disk
                     message_id=event.event_id,
                     type=event.event_type,
                 ),
                 mandatory=True,
+            )
+        except UnroutableError:
+            # No queue is bound to this routing key. In pub/sub that is a
+            # topology gap, not a delivery failure: retrying cannot help,
+            # and dead-lettering would discard the event permanently. The
+            # broker accepted it; nobody was listening. Log and move on.
+            logger.warning(
+                "rabbitmq.unroutable event_id=%s routing_key=%s — no queue bound",
+                event.event_id,
+                event.event_type,
             )
         except AMQPError as exc:
             self._reset()

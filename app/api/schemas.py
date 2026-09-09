@@ -19,6 +19,21 @@ class CarUpdate(BaseModel):
 
     model_config = ConfigDict(protected_namespaces=())
 
+    @model_validator(mode="before")
+    @classmethod
+    def reject_explicit_nulls(cls, data):
+        """
+        `None` here means "field omitted", never "set this column to
+        NULL" — every updatable column is NOT NULL. Without this, an
+        explicit `{"model": null}` passes `exclude_unset` and fails in
+        the database as a 500 instead of a 422.
+        """
+        if isinstance(data, dict):
+            nulls = sorted(key for key, value in data.items() if value is None)
+            if nulls:
+                raise ValueError(f"Field(s) may not be null: {nulls}")
+        return data
+
     @model_validator(mode="after")
     def at_least_one_field(self):
         if self.model is None and self.year is None and self.status is None:

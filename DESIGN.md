@@ -45,12 +45,12 @@ verifiable rather than asserted.
 | 5 | Separation of layers | ✅ | §2; enforced by import direction |
 | 5 | SOLID principles | ✅ | §6, with concrete mapping |
 | 5 | Clean, readable, documented code | ✅ | Docstrings state *why*, not *what* |
-| 5 | At least 4 unit tests | ✅ | **53 tests** across 6 files — §8 |
+| 5 | At least 4 unit tests | ✅ | **60 tests** across 6 files — §8 |
 | 6 | Runs as a standalone Python application | ✅ | `uv run uvicorn app.main:app` |
 | 6 | Dependency management | ✅ | `pyproject.toml` + `uv.lock` (§9) |
-| 6 | `docker-compose.yml` | ✅ | App + PostgreSQL, healthcheck-gated |
-| 7 | Public Git repository | ⬜ | **Requires your action** — see §11 |
-| 7 | Clear commit messages, feature branch | ⬜ | **Requires your action** — see §11 |
+| 6 | `docker-compose.yml` | ✅ | API, relay, consumer, PostgreSQL, RabbitMQ, migrate job |
+| 7 | Public Git repository | ✅ | Hosted on GitHub |
+| 7 | Clear commit messages, feature branch | ✅ | Scoped commits on `drivenow_branch` |
 | — | Message queue communication *(optional)* | ✅ | Transactional outbox + RabbitMQ — §10 |
 
 ### Deliverables
@@ -63,16 +63,13 @@ verifiable rather than asserted.
 | README: how to use the API | ✅ | Endpoint table + `curl` examples |
 | README: architecture description | ✅ | |
 | README: example usage | ✅ | |
-| README: screenshots *(recommended)* | ⬜ | **Requires your action** — §11 |
-| Link to Git repository | ⬜ | **Requires your action** — §11 |
+| README: screenshots *(recommended)* | ✅ | `docs/` — Swagger UI, metrics, event flow |
+| Link to Git repository | ✅ | GitHub |
 
 **Beyond the brief** (each justified in the section noted): transactional
 outbox with RabbitMQ (§10), CI pipeline (§9), PostgreSQL integration tests
 covering concurrency (§8), soft deletes, correlation IDs, and readiness
 probes.
-
-**Two open items are yours, not the code's:** the Git repository and
-screenshots. §11 covers both.
 
 ---
 
@@ -357,15 +354,15 @@ alone cannot.
 
 ## 8. Testing strategy
 
-37 tests, four files, each targeting a different failure class. The
+60 tests across six files, each targeting a different failure class. The
 assignment asks for four; the count is a consequence of testing the
 concurrency and transaction guarantees, not padding.
 
 | File | Tests | Targets |
 |---|---|---|
-| `test_car_service.py` | 7 | Vehicle rules, partial updates, history preservation |
-| `test_rental_service.py` | 12 | Rental lifecycle, status transitions, rollback |
-| `test_api.py` | 14 | Status-code mapping, validation, serialization, correlation IDs |
+| `test_car_service.py` | 10 | Vehicle rules, partial updates, history preservation |
+| `test_rental_service.py` | 13 | Rental lifecycle, status transitions, rollback |
+| `test_api.py` | 17 | Status-code mapping, validation, serialization, correlation IDs |
 | `test_constraints.py` | 4 | Database invariants, asserted by bypassing the service |
 | `test_outbox.py` | 13 | Event atomicity, relay retry/dead-letter, idempotency |
 | `test_integration_postgres.py` | 3 | Real concurrency, partial index, JSONB *(marked `integration`)* |
@@ -410,9 +407,11 @@ the fast suite needs nothing running. CI executes both.
   ranges; `uv.lock` pins every dependency **including transitive ones**,
   with hashes. A pinned `requirements.txt` constrains only direct
   dependencies — `fastapi==0.115.0` still lets `starlette` drift between
-  builds. An exported `requirements.txt` is kept as a pip fallback.
-- **`docker-compose.yml`**: PostgreSQL with a healthcheck; the app waits
-  on it, runs `alembic upgrade head`, then serves.
+  builds — so the lockfile is the only dependency manifest kept.
+- **`docker-compose.yml`**: six services — PostgreSQL and RabbitMQ, both
+  healthcheck-gated; a one-shot `migrate` job the others wait on, so no
+  container races to apply the same migration; then the API, the outbox
+  relay and the notifications consumer.
 - **Container hardening**: multi-stage build (no compiler or uv in the
   runtime image), non-root user, `HEALTHCHECK` instruction.
 - **Schema ownership**: Alembic migrations, not `create_all()`. Startup
@@ -485,7 +484,7 @@ flowchart LR
 |---|---|---|
 | Event definitions | `app/services/events.py` | Typed event contract |
 | Outbox table | `app/models/outbox.py` | `outbox_events`, `processed_events` |
-| Staging | `app/repositories/outbox_repository.py` | Write in-transaction; claim batches |
+| Staging | `app/repositories/outbox_repository.py` | Write in-transaction; claim rows individually |
 | Publisher | `app/messaging/publisher.py` | `EventPublisher` Protocol + 3 impls |
 | RabbitMQ | `app/messaging/rabbitmq.py` | Topic exchange, publisher confirms |
 | Relay | `app/relay/relay.py` | Poll → publish → mark |
@@ -513,9 +512,20 @@ budget for nothing.
 successfully for a message the broker never accepted, and the relay would
 mark it published. That is a silent-loss bug that only appears under load.
 
-**Multiple relay instances are safe.** `SELECT … FOR UPDATE SKIP LOCKED`
-means a second worker skips rows the first has claimed rather than
-blocking or double-publishing.
+**Multiple relay instances are safe.** Each row is locked individually
+with `SELECT … FOR UPDATE SKIP LOCKED`, held across the publish and the
+status update, so a second worker skips it rather than blocking or
+double-publishing. The lock is deliberately *not* taken over the whole
+batch: the relay commits after every event, and a commit releases every
+lock the transaction holds — a batch-wide claim would protect only the
+first event and leave the rest of the batch unlocked mid-flight.
+
+**An unroutable event is not a failure.** Publishing is `mandatory`, so
+RabbitMQ returns a message no queue is bound to. That is a topology gap,
+not a delivery problem: the broker accepted it and no retry can change
+the outcome, so it is logged and the row marked published. Treating it as
+a failure would dead-letter every event type nobody happens to consume
+yet — the opposite of what the outbox is for.
 
 ### Deliberate tradeoffs
 
@@ -542,39 +552,30 @@ and publish latency.
 
 ---
 
-## 11. Open items requiring your action
+## 11. Known limitations
 
-| Item | Command / action |
-|---|---|
-| Generate the lockfile | `uv lock` — required before Docker builds (`--frozen` fails without it) |
-| Run the test suite | `make test` — I could not execute it; see the note below |
-| Git repository | `git init && git checkout -b feature/vehicle-management`, then push to a public repo |
-| Commit messages | Prefer several scoped commits over one bulk commit — e.g. `feat: add rental lifecycle with atomic transaction boundary` |
-| Screenshots | `/docs` (Swagger UI), `/metrics`, RabbitMQ UI at `:15672`, and relay/consumer logs showing an event flow end to end |
-| Watch the pipeline | `make up`, then `make seed`, then `docker compose logs -f relay notifications` |
-
-> **Verification note:** the environment I built this in has no network
-> access, so I could not install dependencies or execute `pytest`. Every
-> file compiles and the logic has been reviewed carefully, but the suite
-> has not been *run*. Please run `make test` before submitting; if
-> anything fails, the fix is quick.
-
----
-
-## 12. Known limitations
-
-Stating these is deliberate — an interviewer will find them anyway, and
-knowing where the boundaries are is part of the design.
+Stating these is deliberate: knowing where the boundaries are is part of
+the design.
 
 - **No authentication or authorization.** Every caller is trusted.
   Out of scope for the exercise; first addition for a real internal tool.
 - **No idempotency keys** on `POST /rentals`. A client retry after a
   timeout could create a second rental.
 - **No rate limiting.**
+- **The broker path has no automated test.** The relay is covered through
+  an in-memory publisher, so its retry, dead-letter and idempotency
+  behaviour is asserted — but the RabbitMQ publisher and the notifications
+  consumer are only exercised by hand against `docker compose`. Asserting
+  real delivery means polling a live queue for an asynchronous result,
+  which belongs in a separate marked suite rather than the sub-second one.
+  Untested seams between a producer and a broker are where routing and
+  topology mistakes hide.
 - **Relay ordering** is not globally guaranteed across multiple workers (§10).
 - **Consumer idempotency ledger** shares the producer's database (§10).
 - **`end_date` conflates planned and actual return** (§5).
-- **Row-locking untested** against real PostgreSQL (§8).
+- **Metrics are per-process.** Under multiple uvicorn workers each holds
+  its own registry; `prometheus_client`'s multiprocess collector would be
+  the fix.
 - **Offset pagination** degrades on large offsets; keyset pagination
   would be the fix at fleet scale.
 - **No pricing or overdue detection** — the obvious next domain concepts.

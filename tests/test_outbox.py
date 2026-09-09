@@ -4,11 +4,12 @@ Transactional outbox and relay behaviour.
 The point of these tests is the *atomicity* guarantee: an event exists if
 and only if the business fact it describes exists.
 """
+
+import pytest
+
 from app.models.car import CarStatus
 from app.models.outbox import OutboxEvent, OutboxStatus
 from app.services.exceptions import CarNotAvailableError
-
-import pytest
 
 
 def _events(db_session):
@@ -16,6 +17,7 @@ def _events(db_session):
 
 
 # ---- the atomicity guarantee ----
+
 
 def test_successful_rental_writes_an_event(car_service, rental_service, db_session):
     car = car_service.add_car(model="Event Car", year=2023)
@@ -46,7 +48,7 @@ def test_event_payload_is_json_serializable(car_service, rental_service, db_sess
     car = car_service.add_car(model="Payload Car", year=2021)
     rental = rental_service.start_rental(car_id=car.id, customer_name="Linus")
 
-    event = [e for e in _events(db_session) if e.event_type == "rental.started"][0]
+    event = next(e for e in _events(db_session) if e.event_type == "rental.started")
     assert event.payload["rental_id"] == rental.id
     assert isinstance(event.payload["start_date"], str)
     assert event.aggregate_type == "rental"
@@ -73,8 +75,10 @@ def test_events_start_pending_with_unique_ids(car_service, db_session):
 
 # ---- relay behaviour ----
 
-def test_relay_publishes_and_marks_events(car_service, rental_service,
-                                          relay, publisher, db_session):
+
+def test_relay_publishes_and_marks_events(
+    car_service, rental_service, relay, publisher, db_session
+):
     car = car_service.add_car(model="Relay Car", year=2023)
     rental_service.start_rental(car_id=car.id, customer_name="Turing")
 
@@ -91,8 +95,7 @@ def test_relay_is_a_noop_when_nothing_pending(relay, publisher, db_session):
     assert publisher.published == []
 
 
-def test_published_events_are_not_republished(car_service, relay,
-                                              publisher, db_session):
+def test_published_events_are_not_republished(car_service, relay, publisher, db_session):
     car_service.add_car(model="Once Only", year=2022)
     relay.process_batch(db_session)
 
@@ -101,8 +104,7 @@ def test_published_events_are_not_republished(car_service, relay,
     assert len(publisher.published) == 1
 
 
-def test_publish_failure_leaves_event_pending_for_retry(car_service, relay,
-                                                        publisher, db_session):
+def test_publish_failure_leaves_event_pending_for_retry(car_service, relay, publisher, db_session):
     """A broker outage must not lose the event — it stays pending."""
     car_service.add_car(model="Flaky Broker", year=2022)
     publisher.fail_next = 1
@@ -120,8 +122,7 @@ def test_publish_failure_leaves_event_pending_for_retry(car_service, relay,
     assert _events(db_session)[0].status == OutboxStatus.PUBLISHED
 
 
-def test_event_is_dead_lettered_after_max_attempts(car_service, relay,
-                                                   publisher, db_session):
+def test_event_is_dead_lettered_after_max_attempts(car_service, relay, publisher, db_session):
     car_service.add_car(model="Poison Pill", year=2022)
     publisher.fail_next = 99  # never succeeds
 
@@ -133,8 +134,7 @@ def test_event_is_dead_lettered_after_max_attempts(car_service, relay,
     assert event.attempts == relay.max_attempts
 
 
-def test_relay_stops_batch_on_broker_failure(car_service, relay,
-                                             publisher, db_session):
+def test_relay_stops_batch_on_broker_failure(car_service, relay, publisher, db_session):
     """
     One failure means the broker is likely down. Continuing would burn the
     retry budget of every remaining event for no reason.
@@ -151,8 +151,8 @@ def test_relay_stops_batch_on_broker_failure(car_service, relay,
 
 # ---- consumer idempotency ----
 
-def test_consumer_ledger_detects_duplicates(car_service, relay,
-                                            outbox_repo, db_session):
+
+def test_consumer_ledger_detects_duplicates(car_service, relay, outbox_repo, db_session):
     car_service.add_car(model="Dedupe Car", year=2023)
     relay.process_batch(db_session)
     event_id = _events(db_session)[0].event_id
@@ -166,8 +166,7 @@ def test_consumer_ledger_detects_duplicates(car_service, relay,
     assert outbox_repo.already_processed(event_id, "billing") is False
 
 
-def test_outbox_pending_and_failed_counts(car_service, relay,
-                                          publisher, outbox_repo, db_session):
+def test_outbox_pending_and_failed_counts(car_service, relay, publisher, outbox_repo, db_session):
     car_service.add_car(model="Counted", year=2022)
     assert outbox_repo.count_pending() == 1
 

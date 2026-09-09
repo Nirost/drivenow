@@ -6,6 +6,7 @@ from app.models.car import CarStatus
 from app.services.exceptions import (
     CarNotAvailableError,
     CarNotFoundError,
+    InvalidRentalPeriodError,
     RentalAlreadyEndedError,
     RentalNotFoundError,
 )
@@ -116,11 +117,24 @@ def test_list_active_rentals_excludes_finished(car_service, rental_service):
 def test_backdated_rental_can_be_ended_today(car_service, rental_service):
     car = car_service.add_car(model="Mini Cooper", year=2021)
     yesterday = date.today() - timedelta(days=1)
-    rental = rental_service.start_rental(
-        car_id=car.id, customer_name="Nina", start_date=yesterday
-    )
+    rental = rental_service.start_rental(car_id=car.id, customer_name="Nina", start_date=yesterday)
 
     ended = rental_service.end_rental(rental.id)
 
     assert ended.start_date == yesterday
     assert ended.end_date >= ended.start_date
+
+
+def test_ending_before_start_date_is_rejected(car_service, rental_service):
+    """
+    The check constraint would catch this too, but only as an
+    IntegrityError surfacing to the client as a 500.
+    """
+    car = car_service.add_car(model="Seat Ibiza", year=2020)
+    rental = rental_service.start_rental(car_id=car.id, customer_name="Omar")
+
+    with pytest.raises(InvalidRentalPeriodError):
+        rental_service.end_rental(rental.id, end_date=date.today() - timedelta(days=3))
+
+    assert rental_service.get_rental(rental.id).is_active
+    assert car_service.get_car(car.id).status == CarStatus.IN_USE

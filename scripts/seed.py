@@ -7,6 +7,7 @@ the notifications consumer.
 
     make seed
 """
+
 from datetime import date, timedelta
 
 from app.core.database import SessionLocal, UnitOfWork

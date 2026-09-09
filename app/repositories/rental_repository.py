@@ -1,4 +1,5 @@
 """Data access layer for Rental. Flushes, never commits."""
+
 from datetime import date
 
 from sqlalchemy import func, select
@@ -20,12 +21,19 @@ class RentalRepository:
     def get_by_id(self, rental_id: int) -> Rental | None:
         return self.db.get(Rental, rental_id)
 
+    def get_for_update(self, rental_id: int) -> Rental | None:
+        """
+        Fetch a rental with a row-level lock, serializing concurrent
+        attempts to end the same rental.
+        """
+        stmt = select(Rental).where(Rental.id == rental_id).with_for_update()
+        return self.db.scalars(stmt).first()
+
     def get_active_for_car(self, car_id: int) -> Rental | None:
         stmt = select(Rental).where(Rental.car_id == car_id, Rental.end_date.is_(None))
         return self.db.scalars(stmt).first()
 
-    def list_all(self, active_only: bool = False,
-                 limit: int = 50, offset: int = 0) -> list[Rental]:
+    def list_all(self, active_only: bool = False, limit: int = 50, offset: int = 0) -> list[Rental]:
         stmt = select(Rental).options(joinedload(Rental.car))
         if active_only:
             stmt = stmt.where(Rental.end_date.is_(None))

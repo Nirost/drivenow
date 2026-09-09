@@ -63,9 +63,7 @@ def test_pagination_limit_is_bounded(client):
 def test_full_rental_lifecycle(client):
     car = _add_car(client, model="Fiat Panda", year=2019)
 
-    rental = client.post(
-        "/rentals", json={"car_id": car["id"], "customer_name": "Olivia"}
-    ).json()
+    rental = client.post("/rentals", json={"car_id": car["id"], "customer_name": "Olivia"}).json()
     assert client.get(f"/cars/{car['id']}").json()["status"] == "in_use"
 
     ended = client.post(f"/rentals/{rental['id']}/end", json={}).json()
@@ -112,3 +110,28 @@ def test_metrics_endpoint_exposes_gauges(client):
 
     assert "drivenow_active_cars" in body
     assert "drivenow_http_request_duration_seconds" in body
+
+
+def test_explicit_null_field_returns_422(client):
+    """`{"model": null}` must not reach the database as a NOT NULL violation."""
+    car = _add_car(client)
+    response = client.patch(f"/cars/{car['id']}", json={"model": None, "year": 2024})
+    assert response.status_code == 422
+
+
+def test_ending_before_start_date_returns_400(client):
+    car = _add_car(client, model="Audi A3", year=2022)
+    rental = client.post("/rentals", json={"car_id": car["id"], "customer_name": "Yara"}).json()
+
+    response = client.post(f"/rentals/{rental['id']}/end", json={"end_date": "2020-01-01"})
+
+    assert response.status_code == 400
+    assert response.json()["code"] == "invalid_rental_period"
+
+
+def test_setting_in_use_directly_returns_409(client):
+    car = _add_car(client, model="Peugeot 208", year=2021)
+    response = client.patch(f"/cars/{car['id']}", json={"status": "in_use"})
+
+    assert response.status_code == 409
+    assert response.json()["code"] == "invalid_status_transition"

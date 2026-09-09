@@ -8,6 +8,7 @@ rental attempts is only genuinely exercised here.
 Skipped automatically unless DATABASE_URL points at PostgreSQL:
     DATABASE_URL=postgresql+psycopg2://... uv run pytest -m integration
 """
+
 import os
 import threading
 
@@ -47,8 +48,12 @@ def pg_engine():
 @pytest.fixture()
 def clean_db(pg_engine):
     with pg_engine.begin() as conn:
-        conn.execute(text("TRUNCATE outbox_events, processed_events, rentals, cars "
-                          "RESTART IDENTITY CASCADE"))
+        conn.execute(
+            text(
+                "TRUNCATE outbox_events, processed_events, rentals, cars "
+                "RESTART IDENTITY CASCADE"
+            )
+        )
     return pg_engine
 
 
@@ -113,9 +118,9 @@ def test_concurrent_rentals_yield_exactly_one_winner(clean_db):
         status = verify.execute(
             text("SELECT status FROM cars WHERE id = :i"), {"i": car_id}
         ).scalar()
-        events = verify.query(OutboxEvent).filter(
-            OutboxEvent.event_type == "rental.started"
-        ).count()
+        events = (
+            verify.query(OutboxEvent).filter(OutboxEvent.event_type == "rental.started").count()
+        )
     finally:
         verify.close()
 
@@ -127,10 +132,12 @@ def test_concurrent_rentals_yield_exactly_one_winner(clean_db):
 def test_partial_unique_index_exists(clean_db):
     """Guards against the index being dropped from a future migration."""
     with clean_db.connect() as conn:
-        found = conn.execute(text(
-            "SELECT indexdef FROM pg_indexes "
-            "WHERE indexname = 'uq_one_active_rental_per_car'"
-        )).scalar()
+        found = conn.execute(
+            text(
+                "SELECT indexdef FROM pg_indexes "
+                "WHERE indexname = 'uq_one_active_rental_per_car'"
+            )
+        ).scalar()
     assert found is not None
     assert "end_date IS NULL" in found
 
@@ -144,10 +151,12 @@ def test_jsonb_payload_is_queryable(clean_db):
         session.commit()
         service.start_rental(car_id=car.id, customer_name="Jsonb Jane")
 
-        found = session.execute(text(
-            "SELECT payload->>'customer_name' FROM outbox_events "
-            "WHERE event_type = 'rental.started'"
-        )).scalar()
+        found = session.execute(
+            text(
+                "SELECT payload->>'customer_name' FROM outbox_events "
+                "WHERE event_type = 'rental.started'"
+            )
+        ).scalar()
     finally:
         session.close()
 

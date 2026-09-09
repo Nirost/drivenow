@@ -4,6 +4,7 @@ Database-level guarantees.
 These assert that correctness does not depend on the application layer
 behaving: even a direct, service-bypassing write must be rejected.
 """
+
 from datetime import date, timedelta
 
 import pytest
@@ -41,14 +42,11 @@ def test_sequential_rentals_are_allowed(db_session):
 
     yesterday = date.today() - timedelta(days=1)
     db_session.add(
-        Rental(car_id=car.id, customer_name="First",
-               start_date=yesterday, end_date=date.today())
+        Rental(car_id=car.id, customer_name="First", start_date=yesterday, end_date=date.today())
     )
     db_session.flush()
 
-    db_session.add(
-        Rental(car_id=car.id, customer_name="Second", start_date=date.today())
-    )
+    db_session.add(Rental(car_id=car.id, customer_name="Second", start_date=date.today()))
     db_session.flush()  # must not raise
 
     assert len(db_session.query(Rental).all()) == 2
@@ -79,8 +77,7 @@ def test_hard_deleting_a_car_with_history_is_refused(db_session):
     db_session.add(car)
     db_session.flush()
     db_session.add(
-        Rental(car_id=car.id, customer_name="Quinn",
-               start_date=date.today(), end_date=date.today())
+        Rental(car_id=car.id, customer_name="Quinn", start_date=date.today(), end_date=date.today())
     )
     db_session.flush()
 

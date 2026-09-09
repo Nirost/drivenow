@@ -6,6 +6,7 @@ effect of rental activity, so car state and rental state can never drift
 apart. Both mutations happen inside a single UnitOfWork — they commit
 together or not at all.
 """
+
 from datetime import date
 
 from sqlalchemy.exc import IntegrityError
@@ -22,6 +23,7 @@ from app.services.exceptions import (
     CarNotAvailableError,
     CarNotFoundError,
     ConcurrentRentalError,
+    InvalidRentalPeriodError,
     RentalAlreadyEndedError,
     RentalNotFoundError,
 )
@@ -30,15 +32,21 @@ logger = get_logger(__name__)
 
 
 class RentalService:
-    def __init__(self, uow: UnitOfWork, car_repo: CarRepository,
-                 rental_repo: RentalRepository, outbox_repo: OutboxRepository):
+    def __init__(
+        self,
+        uow: UnitOfWork,
+        car_repo: CarRepository,
+        rental_repo: RentalRepository,
+        outbox_repo: OutboxRepository,
+    ):
         self.uow = uow
         self.car_repo = car_repo
         self.rental_repo = rental_repo
         self.outbox_repo = outbox_repo
 
-    def start_rental(self, car_id: int, customer_name: str,
-                     start_date: date | None = None) -> Rental:
+    def start_rental(
+        self, car_id: int, customer_name: str, start_date: date | None = None
+    ) -> Rental:
         try:
             with self.uow:
                 # Row lock first: a competing transaction for this same
@@ -48,9 +56,7 @@ class RentalService:
                     raise CarNotFoundError(car_id)
 
                 if car.status != CarStatus.AVAILABLE:
-                    logger.warning(
-                        "rental.rejected car_id=%s status=%s", car_id, car.status.value
-                    )
+                    logger.warning("rental.rejected car_id=%s status=%s", car_id, car.status.value)
                     raise CarNotAvailableError(car_id, car.status.value)
 
                 rental = self.rental_repo.create(
@@ -74,19 +80,31 @@ class RentalService:
 
         logger.info(
             "rental.started id=%s car_id=%s customer=%s",
-            rental.id, car_id, customer_name,
+            rental.id,
+            car_id,
+            customer_name,
         )
         return rental
 
     def end_rental(self, rental_id: int, end_date: date | None = None) -> Rental:
         with self.uow:
-            rental = self.rental_repo.get_by_id(rental_id)
+            # Row lock: two concurrent end requests would otherwise both
+            # read is_active=True and both close the rental, emitting two
+            # rental.ended events for one return.
+            rental = self.rental_repo.get_for_update(rental_id)
             if rental is None:
                 raise RentalNotFoundError(rental_id)
             if not rental.is_active:
                 raise RentalAlreadyEndedError(rental_id)
 
-            rental = self.rental_repo.set_end_date(rental, end_date or date.today())
+            effective_end = end_date or date.today()
+            # The database enforces this too (ck_rentals_end_after_start),
+            # but reaching it would surface as a 500. Client input gets a
+            # clean domain error instead.
+            if effective_end < rental.start_date:
+                raise InvalidRentalPeriodError(rental_id, rental.start_date, effective_end)
+
+            rental = self.rental_repo.set_end_date(rental, effective_end)
 
             # Only free the car if it is still the one out on this rental.
             # A car sent to maintenance mid-rental should stay there.
@@ -105,8 +123,7 @@ class RentalService:
             raise RentalNotFoundError(rental_id)
         return rental
 
-    def list_rentals(self, active_only: bool = False,
-                     limit: int = 50, offset: int = 0) -> list[Rental]:
-        return self.rental_repo.list_all(
-            active_only=active_only, limit=limit, offset=offset
-        )
+    def list_rentals(
+        self, active_only: bool = False, limit: int = 50, offset: int = 0
+    ) -> list[Rental]:
+        return self.rental_repo.list_all(active_only=active_only, limit=limit, offset=offset)

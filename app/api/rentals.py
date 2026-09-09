@@ -1,4 +1,5 @@
 """Rental endpoints. Error translation lives in app/api/errors.py."""
+
 from fastapi import APIRouter, Query, status
 
 from app.api.deps import PaginationDep, RentalServiceDep
@@ -9,8 +10,7 @@ router = APIRouter(prefix="/rentals", tags=["rentals"])
 _ERRORS = {404: {"model": ErrorResponse}, 409: {"model": ErrorResponse}}
 
 
-@router.post("", response_model=RentalOut, status_code=status.HTTP_201_CREATED,
-             responses=_ERRORS)
+@router.post("", response_model=RentalOut, status_code=status.HTTP_201_CREATED, responses=_ERRORS)
 def start_rental(payload: RentalCreate, service: RentalServiceDep):
     """
     Register a rental and mark the vehicle in use.
@@ -31,9 +31,7 @@ def list_rentals(
     page: PaginationDep,
     active_only: bool = Query(default=False, description="Only ongoing rentals"),
 ):
-    return service.list_rentals(
-        active_only=active_only, limit=page.limit, offset=page.offset
-    )
+    return service.list_rentals(active_only=active_only, limit=page.limit, offset=page.offset)
 
 
 @router.get("/{rental_id}", response_model=RentalOut, responses=_ERRORS)

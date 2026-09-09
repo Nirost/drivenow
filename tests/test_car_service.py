@@ -4,6 +4,7 @@ from app.models.car import CarStatus
 from app.services.exceptions import (
     CarHasActiveRentalError,
     CarNotFoundError,
+    InvalidStatusTransitionError,
     NoFieldsToUpdateError,
 )
 
@@ -64,3 +65,37 @@ def test_retired_car_is_hidden_but_history_survives(car_service, rental_service)
         car_service.get_car(car.id)
     # The rental history is still intact and still points at the car.
     assert rental_service.get_rental(rental.id).car_id == car.id
+
+
+def test_in_use_cannot_be_set_directly(car_service):
+    """A car in use with no rental behind it is unrepresentable state."""
+    car = car_service.add_car(model="Kia Ceed", year=2021)
+
+    with pytest.raises(InvalidStatusTransitionError):
+        car_service.update_car(car.id, status=CarStatus.IN_USE)
+
+    assert car_service.get_car(car.id).status == CarStatus.AVAILABLE
+
+
+def test_cannot_free_a_car_that_is_still_rented(car_service, rental_service):
+    car = car_service.add_car(model="Skoda Fabia", year=2020)
+    rental_service.start_rental(car_id=car.id, customer_name="Ruth")
+
+    with pytest.raises(InvalidStatusTransitionError):
+        car_service.update_car(car.id, status=CarStatus.AVAILABLE)
+
+    assert car_service.get_car(car.id).status == CarStatus.IN_USE
+
+
+def test_rented_car_can_still_be_flagged_for_maintenance(car_service, rental_service):
+    """
+    Deliberately allowed: the car is genuinely unavailable, and ending the
+    rental will not release a car it did not leave IN_USE.
+    """
+    car = car_service.add_car(model="Nissan Micra", year=2019)
+    rental = rental_service.start_rental(car_id=car.id, customer_name="Sam")
+
+    car_service.update_car(car.id, status=CarStatus.UNDER_MAINTENANCE)
+    rental_service.end_rental(rental.id)
+
+    assert car_service.get_car(car.id).status == CarStatus.UNDER_MAINTENANCE
