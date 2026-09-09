@@ -217,7 +217,7 @@ that `/metrics` exposes to Prometheus.
 
 ![Metrics](docs/02-metrics.png)
 
-**The event pipeline** — `make seed` writes to the outbox; the relay
+**The event pipeline** — seeding writes to the outbox; the relay
 publishes each event to RabbitMQ; the notifications consumer handles it
 and records the `event_id` so a redelivery is a no-op.
 
