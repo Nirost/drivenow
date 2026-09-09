@@ -45,7 +45,7 @@ verifiable rather than asserted.
 | 5 | Separation of layers | ✅ | §2; enforced by import direction |
 | 5 | SOLID principles | ✅ | §6, with concrete mapping |
 | 5 | Clean, readable, documented code | ✅ | Docstrings state *why*, not *what* |
-| 5 | At least 4 unit tests | ✅ | **60 tests** across 6 files — §8 |
+| 5 | At least 4 unit tests | ✅ | **62 tests** across 6 files — §8 |
 | 6 | Runs as a standalone Python application | ✅ | `uv run uvicorn app.main:app` |
 | 6 | Dependency management | ✅ | `pyproject.toml` + `uv.lock` (§9) |
 | 6 | `docker-compose.yml` | ✅ | API, relay, consumer, PostgreSQL, RabbitMQ, migrate job |
@@ -354,7 +354,7 @@ alone cannot.
 
 ## 8. Testing strategy
 
-60 tests across six files, each targeting a different failure class. The
+62 tests across six files, each targeting a different failure class. The
 assignment asks for four; the count is a consequence of testing the
 concurrency and transaction guarantees, not padding.
 
@@ -362,7 +362,7 @@ concurrency and transaction guarantees, not padding.
 |---|---|---|
 | `test_car_service.py` | 10 | Vehicle rules, partial updates, history preservation |
 | `test_rental_service.py` | 13 | Rental lifecycle, status transitions, rollback |
-| `test_api.py` | 17 | Status-code mapping, validation, serialization, correlation IDs |
+| `test_api.py` | 19 | Status-code mapping, validation, serialization, correlation IDs |
 | `test_constraints.py` | 4 | Database invariants, asserted by bypassing the service |
 | `test_outbox.py` | 13 | Event atomicity, relay retry/dead-letter, idempotency |
 | `test_integration_postgres.py` | 3 | Real concurrency, partial index, JSONB *(marked `integration`)* |

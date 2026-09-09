@@ -206,7 +206,7 @@ is the path this project is tested on.
 ### Tests
 
 ```bash
-make test                   # 57 unit tests, SQLite, no services needed (3 more need Postgres)
+make test                   # 59 unit tests, SQLite, no services needed (3 more need Postgres)
 make cov                    # with coverage report
 make itest                  # integration tests against real PostgreSQL
 make lint                   # lint + formatting check
@@ -254,6 +254,7 @@ by id.
 | `DELETE` | `/cars/{id}` | 204. Soft delete; 409 during an active rental. |
 | `POST` | `/rentals` | 201. 409 if car unavailable. |
 | `GET` | `/rentals` | `?active_only=true`, paginated. |
+| `GET` | `/rentals/{id}` | 404 if missing. |
 | `POST` | `/rentals/{id}/end` | Closes rental, releases car. 400 if `end_date` precedes the start. |
 
 ```bash

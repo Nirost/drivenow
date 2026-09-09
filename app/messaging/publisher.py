@@ -12,7 +12,7 @@ without a broker).
 from __future__ import annotations
 
 import json
-from typing import Protocol, runtime_checkable
+from typing import Protocol
 
 from app.core.logging_config import get_logger
 from app.models.outbox import OutboxEvent
@@ -24,7 +24,6 @@ class PublishError(RuntimeError):
     """Raised when an event could not be handed to the broker."""
 
 
-@runtime_checkable
 class EventPublisher(Protocol):
     def publish(self, event: OutboxEvent) -> None:
         """Publish one event. Must raise PublishError on failure."""

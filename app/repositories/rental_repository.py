@@ -3,7 +3,7 @@
 from datetime import date
 
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session
 
 from app.models.rental import Rental
 
@@ -34,7 +34,7 @@ class RentalRepository:
         return self.db.scalars(stmt).first()
 
     def list_all(self, active_only: bool = False, limit: int = 50, offset: int = 0) -> list[Rental]:
-        stmt = select(Rental).options(joinedload(Rental.car))
+        stmt = select(Rental)
         if active_only:
             stmt = stmt.where(Rental.end_date.is_(None))
         stmt = stmt.order_by(Rental.id).limit(limit).offset(offset)
